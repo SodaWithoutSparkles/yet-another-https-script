@@ -431,12 +431,12 @@ print_ddns_reciept() {
         mv /tmp/ddns_receipt.log "$receipt_file"
         if [ $? -ne 0 ]; then
             logg "Failed to save DDNS receipt to $receipt_file." "ERROR" "$RED"
-            logg "Saving receipt to /tmp/ddns_reciept.log instead." "INFO"
+            logg "${BOLD}Saving receipt to /tmp/ddns_reciept.log instead.${NORMAL}" "INFO"
         fi
-        logg "DDNS receipt saved to $receipt_file" "INFO"
+        logg "${BOLD}DDNS receipt saved to $receipt_file.${NORMAL}" "INFO"
     else
         logg "Current working directory is not writable." "WARN" "$YELLOW"
-        logg "Saving receipt to /tmp/ddns_reciept.log instead." "INFO"
+        logg "${BOLD}Saving receipt to /tmp/ddns_reciept.log instead.${NORMAL}" "INFO"
     fi
 
 }
