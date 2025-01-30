@@ -29,7 +29,7 @@ print_ascii_art() {
     echo "--------------------------------- Yet Another HTTPS Script ---------------------------------"
 }
 print_usage() {
-    echo "Usage: $0 [options]"
+    echo "Usage: ./yahs.sh [options]"
     echo ""
     echo "Options:"
     echo "  -n, --domain-name      Set the domain name for the HTTPS server"
@@ -49,12 +49,12 @@ print_usage() {
     echo "  -h, --help             Display this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 --backend-url localhost:8080                                     # Minimul viable example"
-    echo "  $0 --backend-url localhost:8080 --domain-name example.com --ipv6    # Provide domain name and enable IPv6"
-    echo "  $0 -b localhost:8080 -n example.com --debug --defaults --pkgs       # No user interaction"
-    echo "  $0 -b localhost:8080 -n example.com -dy --pkgs --force              # Ignore checks as well"
-    echo "  $0 -b localhost:8080 -y --force --pkgs                              # Doesn't even need a domain"
-    echo "  $0 -q                                                               # Just get a DDNS domain and exit"
+    echo "  ./yahs.sh --backend-url localhost:8080                                     # Minimul viable example"
+    echo "  ./yahs.sh --backend-url localhost:8080 --domain-name example.com --ipv6    # Provide domain name and enable IPv6"
+    echo "  ./yahs.sh -b localhost:8080 -n example.com --debug --defaults --pkgs       # No user interaction"
+    echo "  ./yahs.sh -b localhost:8080 -n example.com -dy --pkgs --force              # Ignore checks as well"
+    echo "  ./yahs.sh -b localhost:8080 -y --force --pkgs                              # Doesn't even need a domain"
+    echo "  ./yahs.sh -q                                                               # Just get a DDNS domain and exit"
 
 }
 
