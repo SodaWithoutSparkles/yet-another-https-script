@@ -37,7 +37,7 @@ print_usage() {
     echo "  -p, --port             Set the port number for the HTTPS server, default is 443"
     echo "  -d, --debug            Enable debug mode"
     echo "      --force            Ignore checks results"
-    echo "      --dependencies     Install dependencies automatically"
+    echo "      --pkgs             Install packages automatically"
     echo "  -v, --version[s]       Show script version"
     echo "  -y, --defaults         Use default settings, but interactively ask for permission to install things"
     echo "  -6, --ipv6             Enable IPv6 support"
@@ -48,8 +48,8 @@ print_usage() {
     echo ""
     echo "Examples:"
     echo "  $0 --backend-url localhost:8080 --domain-name example.com --ipv6"
-    echo "  $0 -b localhost:8080 -n example.com --debug --defaults --dependencies       # No user interaction"
-    echo "  $0 -b localhost:8080 -n example.com -dy --dependencies --force              # Ignore checks as well"
+    echo "  $0 -b localhost:8080 -n example.com --debug --defaults --pkgs       # No user interaction"
+    echo "  $0 -b localhost:8080 -n example.com -dy --pkgs --force              # Ignore checks as well"
 
 }
 
@@ -62,7 +62,7 @@ DOMAIN_NAME=""
 ENABLE_IPV4=1
 ENABLE_IPV6=0
 FORCE=0
-INSTALL_DEPENDENCIES=0
+INSTALL_PACKAGES=0
 CADDY=1
 HTTPS_PORT=443
 
@@ -135,8 +135,8 @@ parse_options() {
             FORCE=1
             shift
             ;;
-        --dependencies)
-            INSTALL_DEPENDENCIES=1
+        --pkgs)
+            INSTALL_PACKAGES=1
             shift
             ;;
         --no-caddy)
@@ -199,7 +199,7 @@ install_dependencies() {
 
     echo "Info: The following command will be executed to install dependencies:"
     echo "    $install_cmd"
-    if [ $INSTALL_DEPENDENCIES -eq 0 ]; then
+    if [ $INSTALL_PACKAGES -eq 0 ]; then
         read -p "Do you want to proceed with the installation? [Y/n]: " user_input
         user_input=${user_input:-Y}
         if [[ "$user_input" =~ ^[Nn]$ ]]; then
@@ -266,7 +266,7 @@ check_dependencies() {
     fi
 
     # ask users if they want to install missing dependencies
-    if [ $INSTALL_DEPENDENCIES -eq 1 ]; then
+    if [ $INSTALL_PACKAGES -eq 1 ]; then
         echo "Info: Installing missing dependencies..."
     else
         # Avoid using ask_user_yn function to prevent circular dependency
@@ -659,7 +659,7 @@ if command -v caddy &>/dev/null; then
     logg "Existing configuration are untouched." "SUCCESS" "$GREEN"
     exit 0
 else
-    if [ $CADDY -eq 1 ]; then
+    if [ $CADDY -eq 1 ] && [ $INSTALL_PACKAGES -eq 1]; then
         install_caddy && deploy_caddy_config
     else
         logg "Caddy installation is disabled by user." "INFO" "$YELLOW"
