@@ -32,8 +32,9 @@ print_usage() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -b, --backend-url      Set the backend URL (required)"
-    echo "  -n, --domain-name      Set the domain name (required)"
+    echo "  -n, --domain-name      Set the domain name for the HTTPS server (required)"
+    echo "  -b, --backend-url      Set the backend URL to be reverse proxied "
+    echo "  -p, --port             Set the port number for the HTTPS server, default is 443"
     echo "  -d, --debug            Enable debug mode"
     echo "      --force            Ignore checks results"
     echo "      --dependencies     Install dependencies automatically"
@@ -63,6 +64,7 @@ ENABLE_IPV6=0
 FORCE=0
 INSTALL_DEPENDENCIES=0
 CADDY=1
+HTTPS_PORT=443
 
 # Global variables
 PACKAGE_MGR=""
@@ -72,8 +74,8 @@ PACKAGE_MGR=""
 
 parse_options() {
     # Define options
-    local OPTS="dvhyb:n:6"
-    local LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,dependencies,no-caddy"
+    local OPTS="dvhyb:n:p:6"
+    local LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,dependencies,no-caddy,port:"
 
     # Parse options
     # test getopt first, exit if not supported
@@ -140,6 +142,10 @@ parse_options() {
         --no-caddy)
             CADDY=0
             shift
+            ;;
+        -p | --port)
+            HTTPS_PORT="$2"
+            shift 2
             ;;
         --)
             shift
@@ -423,20 +429,33 @@ verify_parameters() {
         GEN_DOMAIN_NAME=1
     fi
 
-    # Verify backend URL (IPv4:PORT, IPv6:PORT, or localhost:PORT)
+    # Verify backend URL (IPv4:PORT, IPv6:PORT, or localhost:PORT), if CADDY is enabled
     if ! [[ "$BACKEND_URL" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|(\[[0-9a-fA-F:]+\])|localhost):[0-9]+$ ]]; then
         logg "Invalid backend URL: $BACKEND_URL" "ERROR" "$RED"
         if [ $FORCE -eq 0 ]; then
+            if [ $CADDY -eq 1 ]; then
+                logg "FORCE is enabled. Ignoring checks." "WARN" "$YELLOW"
+                logg "Continuing with possibily invalid backend URL." "WARN" "$YELLOW"
+            fi
             exit 1
         fi
     fi
-
     # Verify domain name
     if [ -z "${GEN_DOMAIN_NAME:-}" ]; then
         if ! [[ "$DOMAIN_NAME" =~ ^([a-zA-Z0-9](-*[a-zA-Z0-9])*\.)+[a-zA-Z]{2,}$ ]]; then
             logg "Invalid domain name: $DOMAIN_NAME" "ERROR" "$RED"
             if [ $FORCE -eq 0 ]; then
                 exit 1
+            fi
+        fi
+    fi
+    # Verify HTTPS port
+    if ! [[ "$HTTPS_PORT" =~ ^[0-9]+$ ]] || [ "$HTTPS_PORT" -lt 1 ] || [ "$HTTPS_PORT" -gt 65535 ]; then
+        logg "Invalid HTTPS port: $HTTPS_PORT. Port must be a number between 1 and 65535." "ERROR" "$RED"
+        if [ $FORCE -eq 0 ]; then
+            if [ $CADDY -eq 1 ]; then
+                logg "FORCE is enabled. Ignoring checks." "WARN" "$YELLOW"
+                logg "Continuing with invalid port." "WARN" "$YELLOW"
             fi
         fi
     fi
@@ -567,8 +586,55 @@ install_caddy() {
         exit 1
     fi
     echo "----------------------------------------"
-
     logg "Caddy installed successfully." "SUCCESS"
+
+}
+deploy_caddy_config() {
+    # Create a Caddyfile
+    logg "Deploying Caddy configuration..." "PROG"
+    # generate a random temporary file and echo to it
+    TEMP_FILE=$(mktemp)
+    if [ "$HTTPS_PORT" -eq 443 ]; then
+        echo -e "https://$DOMAIN_NAME {\n    reverse_proxy $BACKEND_URL\n}" >$TEMP_FILE
+    else
+        echo -e "https://$DOMAIN_NAME:$HTTPS_PORT {\n    reverse_proxy $BACKEND_URL\n}" >$TEMP_FILE
+    fi
+    logg "The following Caddy configuration will be deployed:" "INFO"
+    echo "----------------------------------------"
+    cat $TEMP_FILE
+    echo "----------------------------------------"
+    # Ask user to confirm the deployment
+    if [ "$(ask_user_yn "Do you want to deploy the configuration?" "Y")" == "n" ]; then
+        logg "Deployment aborted by user." "ERROR" "$RED"
+        exit 1
+    fi
+    # Create a backup of the existing Caddyfile
+    if [ -f /etc/caddy/Caddyfile ]; then
+        logg "Creating a backup of the existing Caddyfile..." "PROG"
+        local dest="/etc/caddy/Caddyfile-$(date +%s).bak"
+        eval "sudo cp /etc/caddy/Caddyfile $dest"
+        logg "Current CaddyFile backed up to $dest" "SUCCESS"
+    fi
+    # Move the temporary file to the Caddyfile location
+    logg "Deploying Caddy configuration..." "PROG"
+    eval "sudo mv $TEMP_FILE /etc/caddy/Caddyfile"
+    if [ $? -ne 0 ]; then
+        logg "Failed to deploy Caddy configuration." "ERROR" "$RED"
+        exit 1
+    fi
+    logg "Caddy configuration deployed successfully." "SUCCESS"
+    # clean up the temporary file if it exists
+    if [ -f "$TEMP_FILE" ]; then
+        rm -f "$TEMP_FILE"
+    fi
+    # Enable and start caddy service
+    logg "Enabling and starting caddy service..." "PROG"
+    eval "sudo systemctl enable caddy && sudo systemctl restart caddy"
+    if [ $? -ne 0 ]; then
+        logg "Failed to enable and start caddy service." "ERROR" "$RED"
+        exit 1
+    fi
+    logg "Caddy service enabled and started successfully." "SUCCESS"
 }
 # Main script logic
 print_ascii_art
@@ -594,7 +660,7 @@ if command -v caddy &>/dev/null; then
     exit 0
 else
     if [ $CADDY -eq 1 ]; then
-        install_caddy
+        install_caddy && deploy_caddy_config
     else
         logg "Caddy installation is disabled by user." "INFO" "$YELLOW"
         exit 0
