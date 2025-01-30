@@ -44,6 +44,8 @@ print_usage() {
     echo "      --no-ipv4          Disable IPv4 support"
     echo "      --no-ipv6          Disable IPv6 support"
     echo "      --no-caddy         Disable caddy installation"
+    echo "  -q, --quiet            Suppress most outputs, equivalent to --defaults, --force, --pkgs. Except for errors"
+    echo "      --no-log           Disable logging to /tmp/yahs.log"
     echo "  -h, --help             Display this help message"
     echo ""
     echo "Examples:"
@@ -67,7 +69,8 @@ FORCE=0
 INSTALL_PACKAGES=0
 CADDY=1
 HTTPS_PORT=443
-
+QUIET=0
+NO_LOG=0
 # Global variables
 PACKAGE_MGR=""
 
@@ -76,8 +79,8 @@ PACKAGE_MGR=""
 
 parse_options() {
     # Define options
-    local OPTS="dvhyb:n:p:6"
-    local LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,pkgs,no-caddy,port:"
+    local OPTS="qdvhyb:n:p:6"
+    local LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,pkgs,no-caddy,port:,quiet,no-log"
 
     # Parse options
     # test getopt first, exit if not supported
@@ -148,6 +151,17 @@ parse_options() {
         -p | --port)
             HTTPS_PORT="$2"
             shift 2
+            ;;
+        -q | --quiet)
+            QUIET=1
+            USE_DEFAULTS=1
+            FORCE=1
+            INSTALL_PACKAGES=1
+            shift
+            ;;
+        --no-log)
+            NO_LOG=1
+            shift
             ;;
         --)
             shift
@@ -334,12 +348,13 @@ logg() {
         icon=$INFO_TAG
         ;;
     esac
-
-    echo -e "[${icon}]${color} ${message}${NORMAL}"
-
-    if [ -d /tmp ]; then
+    if [ -d /tmp ] && [ "$NO_LOG" -eq 0 ]; then
         echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $message" >>/tmp/yahs.log
     fi
+    if [ $QUIET -eq 1 ] && [ "$level" != "ERROR" ]; then
+        return
+    fi
+    echo -e "[${icon}]${color} ${message}${NORMAL}"
 }
 # Function to print parameters in a box
 print_params_box() {
@@ -771,7 +786,9 @@ finally() {
     fi
 }
 # Main script logic
-print_ascii_art
+if [ $QUIET -eq 0 ]; then
+    print_ascii_art
+fi
 verify_parameters
 
 # if GEN_DOMAIN_NAME is set, run the gen_domain_name function
