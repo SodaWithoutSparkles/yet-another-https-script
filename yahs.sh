@@ -44,7 +44,7 @@ print_usage() {
     echo "      --no-ipv4          Disable IPv4 support"
     echo "      --no-ipv6          Disable IPv6 support"
     echo "      --no-caddy         Disable caddy installation"
-    echo "  -q, --quiet            Suppress most outputs, equivalent to --defaults, --force, --pkgs. Except for errors"
+    echo "  -q, --quiet            Suppress most outputs, equivalent to --defaults, --force, --pkgs, --no-caddy. Except for errors"
     echo "      --no-log           Disable logging to /tmp/yahs.log"
     echo "  -h, --help             Display this help message"
     echo ""
@@ -54,6 +54,7 @@ print_usage() {
     echo "  $0 -b localhost:8080 -n example.com --debug --defaults --pkgs       # No user interaction"
     echo "  $0 -b localhost:8080 -n example.com -dy --pkgs --force              # Ignore checks as well"
     echo "  $0 -b localhost:8080 -y --force --pkgs                              # Doesn't even need a domain"
+    echo "  $0 -q                                                               # Just get a DDNS domain and exit"
 
 }
 
@@ -157,6 +158,7 @@ parse_options() {
             USE_DEFAULTS=1
             FORCE=1
             INSTALL_PACKAGES=1
+            CADDY=0
             shift
             ;;
         --no-log)
@@ -745,9 +747,11 @@ append_caddy_config() {
     # Append the configuration to the existing Caddyfile
     TEMP_FILE=$(gen_caddy_config)
     logg "The following Caddy configuration will be appended to the existing configuration:" "INFO"
+    if [ $QUIET -eq 0 ]; then
     echo "----------------------------------------"
-    cat $TEMP_FILE
+        cat $TEMP_FILE
     echo "----------------------------------------"
+    fi
     # Ask user to confirm the deployment
     if [ "$(ask_user_yn 'Do you want to deploy the configuration?' 'Y')" == "n" ]; then
         logg "Deployment aborted by user." "ERROR" "$RED"
@@ -776,7 +780,7 @@ append_caddy_config() {
     logg "Remember to port forward the HTTPS port ($HTTPS_PORT) if necessary" "INFO"
 }
 finally() {
-    if [ -f "$TEMP_FILE" ]; then
+    if [ -n "${TEMP_FILE:-}" ] && [ -f "$TEMP_FILE" ]; then
         rm -f "$TEMP_FILE"
     fi
     if [ $GEN_DOMAIN_NAME -eq 1 ]; then
