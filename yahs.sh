@@ -32,8 +32,8 @@ print_usage() {
     echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
-    echo "  -n, --domain-name      Set the domain name for the HTTPS server (required)"
-    echo "  -b, --backend-url      Set the backend URL to be reverse proxied "
+    echo "  -n, --domain-name      Set the domain name for the HTTPS server"
+    echo "  -b, --backend-url      Set the backend URL to be reverse proxied (required, unless --no-caddy is set)"
     echo "  -p, --port             Set the port number for the HTTPS server, default is 443"
     echo "  -d, --debug            Enable debug mode"
     echo "      --force            Ignore checks results"
@@ -172,11 +172,27 @@ print_params_box() {
     echo "FORCE       | $FORCE           "
     echo "DEBUG       | $DEBUG           "
     echo "DEFAULTS    | $USE_DEFAULTS    "
-    echo "BACKEND_URL | $BACKEND_URL     "
+    echo "INSTALL_PKGS| $INSTALL_PACKAGES"
     echo "DOMAIN_NAME | $DOMAIN_NAME     "
     echo "ENABLE_IPV4 | $ENABLE_IPV4     "
     echo "ENABLE_IPV6 | $ENABLE_IPV6     "
+    echo "CADDY       | $CADDY           "
+    echo "BACKEND_URL | $BACKEND_URL     "
+    echo "HTTPS_PORT  | $HTTPS_PORT      "
     echo "--------------------------------"
+}
+print_ddns_box() {
+    echo "DDNS Parameters:"
+    echo "--------------------------------"
+    echo "DDNS_PASSWORD | $DDNS_PASSWORD"
+    echo "DOMAIN_NAME   | $DOMAIN_NAME  "
+    echo "--------------------------------"
+    echo "Update:"
+    echo "v4: curl -s https://ipv4.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    echo "v6: curl -s https://ipv6.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    echo "--------------------------------"
+    echo "For more information, visit https://dyn.addr.tools"
+
 }
 # detect if system is using apt/yum/dnf/pacman and install dependencies
 install_dependencies() {
@@ -417,7 +433,7 @@ verify_parameters() {
     if [ $FORCE -eq 1 ]; then
         logg "Force mode is enabled. Ignoring checks." "WARN" "$YELLOW"
     fi
-    if [ -z "$BACKEND_URL" ]; then
+    if [ -z "$BACKEND_URL" ] && [ $CADDY -eq 1 ]; then
         echo "Error: --backend-url is required." >&2
         print_usage
         exit 1
@@ -430,14 +446,15 @@ verify_parameters() {
     fi
 
     # Verify backend URL (IPv4:PORT, IPv6:PORT, or localhost:PORT), if CADDY is enabled
-    if ! [[ "$BACKEND_URL" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|(\[[0-9a-fA-F:]+\])|localhost):[0-9]+$ ]]; then
-        logg "Invalid backend URL: $BACKEND_URL" "ERROR" "$RED"
-        if [ $FORCE -eq 0 ]; then
-            if [ $CADDY -eq 1 ]; then
-                logg "FORCE is enabled. Ignoring checks." "WARN" "$YELLOW"
-                logg "Continuing with possibily invalid backend URL." "WARN" "$YELLOW"
+    if [ $CADDY -eq 1 ]; then
+        if ! [[ "$BACKEND_URL" =~ ^([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+|(\[[0-9a-fA-F:]+\])|localhost):[0-9]+$ ]]; then
+            logg "Invalid backend URL: $BACKEND_URL" "ERROR" "$RED"
+            if [ $FORCE -eq 0 ]; then
+                exit 1
             fi
-            exit 1
+            logg "FORCE is enabled. Ignoring checks." "WARN" "$YELLOW"
+            logg "Continuing with possibily invalid backend URL." "WARN" "$YELLOW"
+
         fi
     fi
     # Verify domain name
@@ -573,7 +590,7 @@ install_caddy() {
     logg "The following command will be executed to install caddy:" "INFO"
     echo "    $install_cmd"
     # ask user to confirm the installation
-    if [ "$(ask_user_yn "Do you want to proceed with the installation?" "Y")" == "n" ]; then
+    if [ $INSTALL_PACKAGES -eq 0 ] && [ "$(ask_user_yn "Do you want to proceed with the installation?" "Y")" == "n" ]; then
         logg "Installation aborted by user." "ERROR" "$RED"
         exit 1
     fi
@@ -589,16 +606,33 @@ install_caddy() {
     logg "Caddy installed successfully." "SUCCESS"
 
 }
-deploy_caddy_config() {
+gen_caddy_config() {
     # Create a Caddyfile
-    logg "Deploying Caddy configuration..." "PROG"
     # generate a random temporary file and echo to it
-    TEMP_FILE=$(mktemp)
+    local TEMP_FILE=$(mktemp)
     if [ "$HTTPS_PORT" -eq 443 ]; then
-        echo -e "https://$DOMAIN_NAME {\n    reverse_proxy $BACKEND_URL\n}" >$TEMP_FILE
+        echo -e "https://$DOMAIN_NAME {\n    reverse_proxy $BACKEND_URL\n}" | tee $TEMP_FILE >/dev/null
     else
-        echo -e "https://$DOMAIN_NAME:$HTTPS_PORT {\n    reverse_proxy $BACKEND_URL\n}" >$TEMP_FILE
+        echo -e "https://$DOMAIN_NAME:$HTTPS_PORT {\n    reverse_proxy $BACKEND_URL\n}" | tee $TEMP_FILE >/dev/null
     fi
+    echo $TEMP_FILE
+}
+backup_caddyfile() {
+    # Create a backup of the existing Caddyfile
+    if [ -f /etc/caddy/Caddyfile ]; then
+        logg "Creating a backup of the existing Caddyfile..." "PROG"
+        local dest="/etc/caddy/Caddyfile-$(date +%s).bak"
+        eval "sudo cp /etc/caddy/Caddyfile $dest"
+        if [ $? -ne 0 ]; then
+            logg "Failed to backup Caddyfile." "ERROR" "$RED"
+            exit 1
+        fi
+        logg "Current CaddyFile backed up to $dest" "SUCCESS"
+    fi
+}
+deploy_caddy_config() {
+    logg "Generating Caddy configuration..." "PROG"
+    TEMP_FILE=$(gen_caddy_config)
     logg "The following Caddy configuration will be deployed:" "INFO"
     echo "----------------------------------------"
     cat $TEMP_FILE
@@ -608,13 +642,8 @@ deploy_caddy_config() {
         logg "Deployment aborted by user." "ERROR" "$RED"
         exit 1
     fi
-    # Create a backup of the existing Caddyfile
-    if [ -f /etc/caddy/Caddyfile ]; then
-        logg "Creating a backup of the existing Caddyfile..." "PROG"
-        local dest="/etc/caddy/Caddyfile-$(date +%s).bak"
-        eval "sudo cp /etc/caddy/Caddyfile $dest"
-        logg "Current CaddyFile backed up to $dest" "SUCCESS"
-    fi
+    # Backup the existing Caddyfile
+    backup_caddyfile
     # Move the temporary file to the Caddyfile location
     logg "Deploying Caddy configuration..." "PROG"
     eval "sudo mv $TEMP_FILE /etc/caddy/Caddyfile"
@@ -623,10 +652,6 @@ deploy_caddy_config() {
         exit 1
     fi
     logg "Caddy configuration deployed successfully." "SUCCESS"
-    # clean up the temporary file if it exists
-    if [ -f "$TEMP_FILE" ]; then
-        rm -f "$TEMP_FILE"
-    fi
     # Enable and start caddy service
     logg "Enabling and starting caddy service..." "PROG"
     eval "sudo systemctl enable caddy && sudo systemctl restart caddy"
@@ -635,6 +660,42 @@ deploy_caddy_config() {
         exit 1
     fi
     logg "Caddy service enabled and started successfully." "SUCCESS"
+    logg "Remember to port forward the HTTPS port ($HTTPS_PORT) if necessary" "INFO"
+}
+
+append_caddy_config() {
+    # Append the configuration to the existing Caddyfile
+    TEMP_FILE=$(gen_caddy_config)
+    logg "The following Caddy configuration will be appended to the existing configuration:" "INFO"
+    echo "----------------------------------------"
+    cat $TEMP_FILE
+    echo "----------------------------------------"
+    # Ask user to confirm the deployment
+    if [ "$(ask_user_yn "Do you want to deploy the configuration?" "Y")" == "n" ]; then
+        logg "Deployment aborted by user." "ERROR" "$RED"
+        exit 1
+    fi
+    backup_caddyfile
+    # Append the configuration to the existing Caddyfile
+    logg "Appending Caddy configuration..." "PROG"
+    echo "----------------------------------------"
+    echo "...${GREEN}"
+    eval "sudo tee -a /etc/caddy/Caddyfile < $TEMP_FILE"
+    echo "${NORMAL}----------------------------------------"
+    if [ $? -ne 0 ]; then
+        logg "Failed to append Caddy configuration." "ERROR" "$RED"
+        exit 1
+    fi
+    logg "Caddy configuration appended successfully." "SUCCESS"
+    # Restart caddy service
+    logg "Restarting caddy service..." "PROG"
+    eval "sudo systemctl restart caddy"
+    if [ $? -ne 0 ]; then
+        logg "Failed to restart caddy service." "ERROR" "$RED"
+        exit 1
+    fi
+    logg "Caddy service restarted successfully." "SUCCESS"
+    logg "Remember to port forward the HTTPS port ($HTTPS_PORT) if necessary" "INFO"
 }
 # Main script logic
 print_ascii_art
@@ -653,16 +714,29 @@ fi
 # create a function to check if the domain name points to current address
 check_domain_resolution
 
-# Check if Caddy is already installed
+if [ $CADDY -eq 0 ]; then
+    logg "Caddy installation is disabled by user." "INFO" "$YELLOW"
+    exit 0
+fi
+
 if command -v caddy &>/dev/null; then
     logg "Caddy is already installed." "INFO"
+    if [ -f /etc/caddy/Caddyfile ]; then
+        logg "Existing configuration found at /etc/caddy/Caddyfile." "INFO"
+        # prompt user to append to existing configuration
+        if [ "$(ask_user_yn "Do you want to append to the existing configuration?" "Y")" == "y" ]; then
+            append_caddy_config
+        else
+            logg "Existing configuration are untouched." "SUCCESS" "$GREEN"
+            exit 0
+        fi
+    fi
     logg "Existing configuration are untouched." "SUCCESS" "$GREEN"
     exit 0
 else
-    if [ $CADDY -eq 1 ] && [ $INSTALL_PACKAGES -eq 1]; then
-        install_caddy && deploy_caddy_config
-    else
-        logg "Caddy installation is disabled by user." "INFO" "$YELLOW"
-        exit 0
-    fi
+    install_caddy && deploy_caddy_config
+fi
+
+if [ $GEN_DOMAIN_NAME -eq 1 ]; then
+    print_ddns_box
 fi
