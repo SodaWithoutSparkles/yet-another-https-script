@@ -2,7 +2,7 @@
 Yet another script to get HTTPS for your web servers 
 
 ## Testing in progress
-Please DO NOT use on production servers. Thanks. The author don't bear any responsibility.
+Please DO NOT use on production servers. Thanks. Use at your own risk.
 
 ## Purposes
   1. Obtain a DDNS subdomain
