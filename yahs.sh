@@ -38,10 +38,11 @@ print_usage() {
     echo "      --force            Ignore checks results"
     echo "      --dependencies     Install dependencies automatically"
     echo "  -v, --version[s]       Show script version"
-    echo "  -y, --defaults         Use default settings, but interactively ask for permission to install dependencies"
+    echo "  -y, --defaults         Use default settings, but interactively ask for permission to install things"
     echo "  -6, --ipv6             Enable IPv6 support"
     echo "      --no-ipv4          Disable IPv4 support"
     echo "      --no-ipv6          Disable IPv6 support"
+    echo "      --no-caddy         Disable caddy installation"
     echo "  -h, --help             Display this help message"
     echo ""
     echo "Examples:"
@@ -51,6 +52,7 @@ print_usage() {
 
 }
 
+# Default values for configuration
 DEBUG=0
 VERSIONS=0
 USE_DEFAULTS=0
@@ -60,86 +62,99 @@ ENABLE_IPV4=1
 ENABLE_IPV6=0
 FORCE=0
 INSTALL_DEPENDENCIES=0
+CADDY=1
+
+# Global variables
+PACKAGE_MGR=""
 
 # Parse options
 # _____________________________________________________________________________
 
-# Define options
-OPTS="dvhyb:n:6"
-LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,dependencies"
+parse_options() {
+    # Define options
+    local OPTS="dvhyb:n:6"
+    local LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,dependencies,no-caddy"
 
-# Parse options
-# test getopt first, exit if not supported
-getopt --test >/dev/null && true
-if [[ $? -ne 4 ]]; then
-    echo '`getopt --test` failed in this environment.'
-    echo 'Ensure util-linux is installed and up to date.'
-    exit 1
-fi
-OPTIONS=$(getopt -o $OPTS --long $LONGOPTS -- "$@")
-if [ $? -ne 0 ]; then
-    echo "Failed to parse options." >&2
-    exit 1
-fi
-
-eval set -- "$OPTIONS"
-
-while true; do
-    case "$1" in
-    -d | --debug)
-        DEBUG=1
-        shift
-        ;;
-    -v | --versions | --version)
-        echo "YAHS version: $VERSION"
-        exit 0
-        ;;
-    -h | --help)
-        print_usage
-        exit 0
-        ;;
-    -y | --defaults)
-        USE_DEFAULTS=1
-        shift
-        ;;
-    -b | --backend-url)
-        BACKEND_URL="$2"
-        shift 2
-        ;;
-    -n | --domain-name)
-        DOMAIN_NAME="$2"
-        shift 2
-        ;;
-    -6 | --ipv6)
-        ENABLE_IPV6=1
-        shift
-        ;;
-    --no-ipv4)
-        ENABLE_IPV4=0
-        shift
-        ;;
-    --no-ipv6)
-        ENABLE_IPV6=0
-        shift
-        ;;
-    --force)
-        FORCE=1
-        shift
-        ;;
-    --dependencies)
-        INSTALL_DEPENDENCIES=1
-        shift
-        ;;
-    --)
-        shift
-        break
-        ;;
-    *)
-        echo "Invalid option: $1" >&2
+    # Parse options
+    # test getopt first, exit if not supported
+    getopt --test >/dev/null && true
+    if [[ $? -ne 4 ]]; then
+        echo '`getopt --test` failed in this environment.'
+        echo 'Ensure util-linux is installed and up to date.'
         exit 1
-        ;;
-    esac
-done
+    fi
+    OPTIONS=$(getopt -o $OPTS --long $LONGOPTS -- "$@")
+    if [ $? -ne 0 ]; then
+        echo "Failed to parse options." >&2
+        exit 1
+    fi
+
+    eval set -- "$OPTIONS"
+
+    while true; do
+        case "$1" in
+        -d | --debug)
+            DEBUG=1
+            shift
+            ;;
+        -v | --versions | --version)
+            echo "YAHS version: $VERSION"
+            exit 0
+            ;;
+        -h | --help)
+            print_usage
+            exit 0
+            ;;
+        -y | --defaults)
+            USE_DEFAULTS=1
+            shift
+            ;;
+        -b | --backend-url)
+            BACKEND_URL="$2"
+            shift 2
+            ;;
+        -n | --domain-name)
+            DOMAIN_NAME="$2"
+            shift 2
+            ;;
+        -6 | --ipv6)
+            ENABLE_IPV6=1
+            shift
+            ;;
+        --no-ipv4)
+            ENABLE_IPV4=0
+            shift
+            ;;
+        --no-ipv6)
+            ENABLE_IPV6=0
+            shift
+            ;;
+        --force)
+            FORCE=1
+            shift
+            ;;
+        --dependencies)
+            INSTALL_DEPENDENCIES=1
+            shift
+            ;;
+        --no-caddy)
+            CADDY=0
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Invalid option: $1" >&2
+            exit 1
+            ;;
+        esac
+    done
+}
+
+# Call the function to parse options
+parse_options "$@"
 
 # _____________________________________________________________________________
 
@@ -159,28 +174,13 @@ print_params_box() {
 }
 # detect if system is using apt/yum/dnf/pacman and install dependencies
 install_dependencies() {
-    local package_manager=""
-    if command -v apt &>/dev/null; then
-        package_manager="apt"
-    elif command -v yum &>/dev/null; then
-        package_manager="yum"
-    elif command -v dnf &>/dev/null; then
-        package_manager="dnf"
-    elif command -v pacman &>/dev/null; then
-        package_manager="pacman"
-    else
-        echo "Error: Unable to detect package manager."
-        exit 1
-    fi
-    echo "Detected package manager: $package_manager"
-
     install_cmd=""
-    case $package_manager in
+    case $PACKAGE_MGR in
     "apt")
         install_cmd="sudo apt update && sudo apt install -y ${missing_dependencies[*]}"
         ;;
     "yum" | "dnf")
-        install_cmd="sudo $package_manager install -y ${missing_dependencies[*]}"
+        install_cmd="sudo $PACKAGE_MGR install -y ${missing_dependencies[*]}"
         ;;
     "pacman")
         install_cmd="sudo pacman -Syu --noconfirm ${missing_dependencies[*]}"
@@ -201,7 +201,7 @@ install_dependencies() {
             exit 1
         fi
     fi
-    echo "Info: Installing dependencies using $package_manager..."
+    echo "Info: Installing dependencies using $PACKAGE_MGR..."
     echo "----------------------------------------"
     eval "$install_cmd"
     # check if dependencies are installed successfully by checking the return code
@@ -235,6 +235,21 @@ check_dependencies() {
             missing_dependencies+=("ncurses")
         fi
     fi
+
+    echo "Detecting package manager..."
+    if command -v apt &>/dev/null; then
+        PACKAGE_MGR="apt"
+    elif command -v yum &>/dev/null; then
+        PACKAGE_MGR="yum"
+    elif command -v dnf &>/dev/null; then
+        PACKAGE_MGR="dnf"
+    elif command -v pacman &>/dev/null; then
+        PACKAGE_MGR="pacman"
+    else
+        echo "Error: Unable to detect package manager."
+        exit 1
+    fi
+    echo "Detected package manager: $PACKAGE_MGR"
     # if there are missing dependencies, prompt users to install them
     if [ ${#missing_dependencies[@]} -ne 0 ]; then
         # print missing dependencies in a line
@@ -512,7 +527,49 @@ check_domain_resolution() {
         logg "Domain name resolution checks passed." "SUCCESS"
     fi
 }
+# Install the caddy webserver
+install_caddy() {
+    # Ref: https://caddyserver.com/docs/install
+    case $PACKAGE_MGR in
+    "apt")
+        install_cmd="sudo apt update && sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https && "
+        install_cmd+="curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && "
+        install_cmd+="curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list && "
+        install_cmd+="sudo apt update && sudo apt install -y caddy"
+        ;;
+    "yum")
+        install_cmd="sudo yum -y install yum-plugin-copr && sudo yum -y enable @caddy/caddy && sudo yum -y install caddy"
+        ;;
+    "dnf")
+        install_cmd="sudo dnf -y install 'dnf-command(copr)' && sudo dnf -y copr enable @caddy/caddy && sudo dnf -y install caddy"
+        ;;
+    "pacman")
+        install_cmd="sudo pacman -Syu --noconfirm caddy"
+        ;;
+    *)
+        logg "Unsupported package manager." "ERROR" "$RED"
+        exit 1
+        ;;
+    esac
+    logg "The following command will be executed to install caddy:" "INFO"
+    echo "    $install_cmd"
+    # ask user to confirm the installation
+    if [ "$(ask_user_yn "Do you want to proceed with the installation?" "Y")" == "n" ]; then
+        logg "Installation aborted by user." "ERROR" "$RED"
+        exit 1
+    fi
+    logg "Installing Caddy web server..." "PROG"
+    echo "----------------------------------------"
+    eval "$install_cmd"
+    # check if dependencies are installed successfully by checking the return code
+    if [ $? -ne 0 ]; then
+        logg "Failed to install caddy." "ERROR" "$RED"
+        exit 1
+    fi
+    echo "----------------------------------------"
 
+    logg "Caddy installed successfully." "SUCCESS"
+}
 # Main script logic
 print_ascii_art
 verify_parameters
@@ -529,3 +586,17 @@ if [ -n "${GEN_DOMAIN_NAME:-}" ]; then
 fi
 # create a function to check if the domain name points to current address
 check_domain_resolution
+
+# Check if Caddy is already installed
+if command -v caddy &>/dev/null; then
+    logg "Caddy is already installed." "INFO"
+    logg "Existing configuration are untouched." "SUCCESS" "$GREEN"
+    exit 0
+else
+    if [ $CADDY -eq 1 ]; then
+        install_caddy
+    else
+        logg "Caddy installation is disabled by user." "INFO" "$YELLOW"
+        exit 0
+    fi
+fi
