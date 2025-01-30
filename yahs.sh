@@ -47,9 +47,11 @@ print_usage() {
     echo "  -h, --help             Display this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 --backend-url localhost:8080 --domain-name example.com --ipv6"
+    echo "  $0 --backend-url localhost:8080                                     # Minimul viable example"
+    echo "  $0 --backend-url localhost:8080 --domain-name example.com --ipv6    # Provide domain name and enable IPv6"
     echo "  $0 -b localhost:8080 -n example.com --debug --defaults --pkgs       # No user interaction"
     echo "  $0 -b localhost:8080 -n example.com -dy --pkgs --force              # Ignore checks as well"
+    echo "  $0 -b localhost:8080 -y --force --pkgs                              # Doesn't even need a domain"
 
 }
 
@@ -75,7 +77,7 @@ PACKAGE_MGR=""
 parse_options() {
     # Define options
     local OPTS="dvhyb:n:p:6"
-    local LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,dependencies,no-caddy,port:"
+    local LONGOPTS="force,debug,versions,version,defaults,backend-url:,domain-name:,ipv6,no-ipv4,no-ipv6,help,pkgs,no-caddy,port:"
 
     # Parse options
     # test getopt first, exit if not supported
@@ -164,36 +166,6 @@ parse_options "$@"
 
 # _____________________________________________________________________________
 
-# Function to print parameters in a box
-print_params_box() {
-    echo "Parameters:"
-    echo "--------------------------------"
-    echo "VERSION     | $VERSION         "
-    echo "FORCE       | $FORCE           "
-    echo "DEBUG       | $DEBUG           "
-    echo "DEFAULTS    | $USE_DEFAULTS    "
-    echo "INSTALL_PKGS| $INSTALL_PACKAGES"
-    echo "DOMAIN_NAME | $DOMAIN_NAME     "
-    echo "ENABLE_IPV4 | $ENABLE_IPV4     "
-    echo "ENABLE_IPV6 | $ENABLE_IPV6     "
-    echo "CADDY       | $CADDY           "
-    echo "BACKEND_URL | $BACKEND_URL     "
-    echo "HTTPS_PORT  | $HTTPS_PORT      "
-    echo "--------------------------------"
-}
-print_ddns_box() {
-    echo "DDNS Parameters:"
-    echo "--------------------------------"
-    echo "DDNS_PASSWORD | $DDNS_PASSWORD"
-    echo "DOMAIN_NAME   | $DOMAIN_NAME  "
-    echo "--------------------------------"
-    echo "Update:"
-    echo "v4: curl -s https://ipv4.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
-    echo "v6: curl -s https://ipv6.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
-    echo "--------------------------------"
-    echo "For more information, visit https://dyn.addr.tools"
-
-}
 # detect if system is using apt/yum/dnf/pacman and install dependencies
 install_dependencies() {
     install_cmd=""
@@ -258,7 +230,6 @@ check_dependencies() {
         fi
     fi
 
-    echo "Detecting package manager..."
     if command -v apt &>/dev/null; then
         PACKAGE_MGR="apt"
     elif command -v yum &>/dev/null; then
@@ -271,15 +242,15 @@ check_dependencies() {
         echo "Error: Unable to detect package manager."
         exit 1
     fi
-    echo "Detected package manager: $PACKAGE_MGR"
-    # if there are missing dependencies, prompt users to install them
-    if [ ${#missing_dependencies[@]} -ne 0 ]; then
-        # print missing dependencies in a line
-        echo "Info: Missing dependencies: ${missing_dependencies[*]}" >&2
-    else
-        echo "Info: All dependencies are installed."
+    # if there are no missing dependencies, return
+    if [ ${#missing_dependencies[@]} -eq 0 ]; then
+        # echo "Info: All dependencies are installed."
         return
     fi
+
+    # if there are missing dependencies, prompt users to install them
+    echo "Detected package manager: $PACKAGE_MGR"
+    echo "Info: Missing dependencies: ${missing_dependencies[*]}" >&2
 
     # ask users if they want to install missing dependencies
     if [ $INSTALL_PACKAGES -eq 1 ]; then
@@ -332,6 +303,7 @@ fi
 # Icons
 GREEN_TICK="${GREEN}✔${NORMAL}"
 RED_CROSS="${RED}✘${NORMAL}"
+RED_QUESTION="${RED}?${NORMAL}"
 INFO_TAG="${BLUE}i${NORMAL}"
 WARN_TAG="${YELLOW}!${NORMAL}"
 PROG="${BLUE}>${NORMAL}"
@@ -369,49 +341,140 @@ logg() {
         echo "$(date '+%Y-%m-%d %H:%M:%S') [$level] $message" >>/tmp/yahs.log
     fi
 }
-# Function: ask_user_preference
-# Description: Prompts the user for input with a default value. If the USE_DEFAULTS
-#              variable is set to 1 and the default value is not empty, it will
-#              automatically use the default value without prompting the user.
-# Parameters:
+# Function to print parameters in a box
+print_params_box() {
+    echo "Parameters:"
+    echo "--------------------------------"
+    echo "VERSION     | $VERSION         "
+    if [ $FORCE -eq 1 ]; then
+        echo -e "FORCE       | ${BOLD}${RED}$FORCE${NORMAL}           "
+    else
+        echo "FORCE       | $FORCE           "
+    fi
+    if [ $DEBUG -eq 1 ]; then
+        echo -e "DEBUG       | ${YELLOW}$DEBUG${NORMAL}           "
+    else
+        echo "DEBUG       | $DEBUG           "
+    fi
+    if [ $USE_DEFAULTS -eq 1 ]; then
+        echo -e "DEFAULTS    | ${YELLOW}$USE_DEFAULTS${NORMAL}    "
+    else
+        echo "DEFAULTS    | $USE_DEFAULTS    "
+    fi
+    if [ $INSTALL_PACKAGES -eq 1 ]; then
+        echo -e "INSTALL_PKGS| ${YELLOW}$INSTALL_PACKAGES${NORMAL}"
+    else
+        echo "INSTALL_PKGS| $INSTALL_PACKAGES"
+    fi
+    echo "DOMAIN_NAME | $DOMAIN_NAME     "
+    echo "ENABLE_IPV4 | $ENABLE_IPV4     "
+    echo "ENABLE_IPV6 | $ENABLE_IPV6     "
+    echo "CADDY       | $CADDY           "
+    echo "BACKEND_URL | $BACKEND_URL     "
+    echo "HTTPS_PORT  | $HTTPS_PORT      "
+    echo "PACKAGE_MGR | $PACKAGE_MGR     "
+    echo "--------------------------------"
+}
+print_ddns_box() {
+    echo "${BOLD}DDNS Parameters${NORMAL}:"
+    echo "--------------------------------"
+    echo "DDNS_PASSWORD | $DDNS_PASSWORD"
+    echo "DOMAIN_NAME   | $DOMAIN_NAME  "
+    echo "--------------------------------"
+    echo "${BOLD}Update${NORMAL}:"
+    if [ $ENABLE_IPV4 -eq 1 ]; then
+        echo "    v4: curl -s https://ipv4.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    fi
+    if [ $ENABLE_IPV6 -eq 1 ]; then
+        echo "    v6: curl -s https://ipv6.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    fi
+    echo "--------------------------------"
+    echo "${BOLD}Crontab (every 10 minutes)${NORMAL}:"
+    if [ $ENABLE_IPV4 -eq 1 ]; then
+        echo "    */10 * * * * curl -s https://ipv4.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    fi
+    if [ $ENABLE_IPV6 -eq 1 ]; then
+        echo "    */10 * * * * curl -s https://ipv6.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    fi
+    echo "--------------------------------"
+    echo "${BOLD}Crontab (5th of every month at 06:09)${NORMAL}:"
+    if [ $ENABLE_IPV4 -eq 1 ]; then
+        echo "    6 9 5 * * curl -s https://ipv4.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    fi
+    if [ $ENABLE_IPV6 -eq 1 ]; then
+        echo "    6 9 5 * * curl -s https://ipv6.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+    fi
+    echo "--------------------------------"
+    echo "Please update at least once every 90 days to keep the domain name."
+    echo "For more information, visit https://dyn.addr.tools"
+}
+print_ddns_reciept() {
+    {
+        echo "DDNS Parameters:"
+        echo "--------------------------------"
+        echo "DDNS_PASSWORD | $DDNS_PASSWORD"
+        echo "DOMAIN_NAME   | $DOMAIN_NAME  "
+        echo "--------------------------------"
+        echo "Update:"
+        if [ $ENABLE_IPV4 -eq 1 ]; then
+            echo "    v4: curl -s https://ipv4.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+        fi
+        if [ $ENABLE_IPV6 -eq 1 ]; then
+            echo "    v6: curl -s https://ipv6.dyn.addr.tools/?secret=$DDNS_PASSWORD&ip=self"
+        fi
+        echo "--------------------------------"
+        echo "Please update at least once every 90 days to keep the domain name."
+        echo "For more information, visit https://dyn.addr.tools"
+    } | tee -a /tmp/ddns_receipt.log >/dev/null
+    local receipt_file="$(pwd)/ddns_reciept.log"
+    if [ -w "$(pwd)" ]; then
+        mv /tmp/ddns_receipt.log "$receipt_file"
+        if [ $? -ne 0 ]; then
+            logg "Failed to save DDNS receipt to $receipt_file." "ERROR" "$RED"
+            logg "Saving receipt to /tmp/ddns_reciept.log instead." "INFO"
+        fi
+        logg "DDNS receipt saved to $receipt_file" "INFO"
+    else
+        logg "Current working directory is not writable." "WARN" "$YELLOW"
+        logg "Saving receipt to /tmp/ddns_reciept.log instead." "INFO"
+    fi
+
+}
+
+# Prompts the user with a yes/no question and returns the user's response.
+#
+# Arguments:
 #   $1 - The prompt message to display to the user.
-#   $2 - The default value to use if the user does not provide any input.
-#   $3 - A hint message to display to the user.
-# Returns: The user's input or the default value if no input is provided.
-# Usage:
-#   user_choice=$(ask_user_preference "Prompt" "default_value" "hint(default_value)")
-ask_user_preference() {
+#   $2 - The default value to use if the user does not provide an input (optional).
+#   $3 - The hint to display in the prompt (optional, defaults to the value of $2).
+#
+# Environment Variables:
+#   USE_DEFAULTS - If set to 1, the function will automatically return the default value without prompting the user.
+#
+# Returns:
+#   The user's response, which will be either 'y' or 'n'. If the user input is invalid or empty, the default value is returned.
+ask_user_yn() {
     local prompt=$1
     local default_value=$2
     local hint=${3:-$default_value}
     local user_input=""
-
-    if [ $USE_DEFAULTS -eq 1 ] && [ -n "$default_value" ]; then
-        logg "Using default for $prompt: $default_value" "INFO" "$YELLOW"
-        echo "$default_value"
+    if [ "$USE_DEFAULTS" -eq 1 ] && [ -n "$default_value" ]; then
+        # to-lower
+        echo "${default_value,,}"
         return
     fi
+    if [[ "$default_value" =~ ^[Yy]$ ]]; then
+        hint="Y/n"
+    else
+        hint="y/N"
+    fi
 
-    read -p "$prompt [$hint]: " user_input
-    if [ -z "$user_input" ]; then
+    read -p "[${RED_QUESTION}] -> $prompt [$hint]: " user_input
+    user_input=${user_input:-$default_value}
+    if [[ ! "$user_input" =~ ^[YyNn]$ ]]; then
         user_input="$default_value"
     fi
-
-    echo "$user_input"
-}
-# special case for user preference where user answers are y/n, reuse the ask_user_preference function
-ask_user_yn() {
-    local yn_default=$(echo "${2:-y}" | tr '[:upper:]' '[:lower:]')
-    if [[ "$yn_default" != "y" && "$yn_default" != "n" ]]; then
-        logg "Invalid default value: $yn_default. Must be 'y' or 'n'." "ERROR" "$RED"
-        exit 1
-    fi
-    local prompt_suffix="Y/n"
-    if [ "$yn_default" == "n" ]; then
-        prompt_suffix="y/N"
-    fi
-    user_choice=$(ask_user_preference "$1" "$yn_default" "$prompt_suffix")
-    echo "$user_choice" | tr '[:upper:]' '[:lower:]'
+    echo "${user_input,,}"
 }
 # _____________________________________________________________________________
 # Main script helper functions
@@ -489,7 +552,7 @@ gen_domain_name() {
         logg "Regenerating password..." "PROG"
         DDNS_PASSWORD=$(head -c 256 /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32)
     done
-    logg "Generated password: $DDNS_PASSWORD" "INFO" "$YELLOW"
+    logg "Generated password: $DDNS_PASSWORD" "INFO"
 
     response=$(curl -s "https://dyn.addr.tools/?secret=$DDNS_PASSWORD")
     if [[ "$response" =~ ^[a-zA-Z0-9]+\.dyn\.addr\.tools\.?$ ]]; then
@@ -590,7 +653,7 @@ install_caddy() {
     logg "The following command will be executed to install caddy:" "INFO"
     echo "    $install_cmd"
     # ask user to confirm the installation
-    if [ $INSTALL_PACKAGES -eq 0 ] && [ "$(ask_user_yn "Do you want to proceed with the installation?" "Y")" == "n" ]; then
+    if [ $INSTALL_PACKAGES -eq 0 ] && [ "$(ask_user_yn 'Do you want to proceed with the installation?' 'Y')" == "n" ]; then
         logg "Installation aborted by user." "ERROR" "$RED"
         exit 1
     fi
@@ -638,7 +701,7 @@ deploy_caddy_config() {
     cat $TEMP_FILE
     echo "----------------------------------------"
     # Ask user to confirm the deployment
-    if [ "$(ask_user_yn "Do you want to deploy the configuration?" "Y")" == "n" ]; then
+    if [ "$(ask_user_yn 'Do you want to deploy the configuration?' 'Y')" == "n" ]; then
         logg "Deployment aborted by user." "ERROR" "$RED"
         exit 1
     fi
@@ -671,7 +734,7 @@ append_caddy_config() {
     cat $TEMP_FILE
     echo "----------------------------------------"
     # Ask user to confirm the deployment
-    if [ "$(ask_user_yn "Do you want to deploy the configuration?" "Y")" == "n" ]; then
+    if [ "$(ask_user_yn 'Do you want to deploy the configuration?' 'Y')" == "n" ]; then
         logg "Deployment aborted by user." "ERROR" "$RED"
         exit 1
     fi
@@ -697,6 +760,16 @@ append_caddy_config() {
     logg "Caddy service restarted successfully." "SUCCESS"
     logg "Remember to port forward the HTTPS port ($HTTPS_PORT) if necessary" "INFO"
 }
+finally() {
+    if [ -f "$TEMP_FILE" ]; then
+        rm -f "$TEMP_FILE"
+    fi
+    if [ $GEN_DOMAIN_NAME -eq 1 ]; then
+        logg "Remember to update your DNS records with the generated domain name." "INFO"
+        print_ddns_box
+        print_ddns_reciept
+    fi
+}
 # Main script logic
 print_ascii_art
 verify_parameters
@@ -704,7 +777,7 @@ verify_parameters
 # if GEN_DOMAIN_NAME is set, run the gen_domain_name function
 if [ -n "${GEN_DOMAIN_NAME:-}" ]; then
     # Ask user if they want to generate a domain name
-    if [ "$(ask_user_yn "Do you want to generate a random domain name?" "Y")"== "n" ]; then
+    if [ "$(ask_user_yn 'Do you want to generate a random domain name?' 'Y')" == "n" ]; then
         logg "Please provide a valid domain name using -n. See -h for help." "ERROR" "$RED"
         logg "Exiting..." "INFO"
         exit 0
@@ -716,6 +789,7 @@ check_domain_resolution
 
 if [ $CADDY -eq 0 ]; then
     logg "Caddy installation is disabled by user." "INFO" "$YELLOW"
+    finally
     exit 0
 fi
 
@@ -724,19 +798,16 @@ if command -v caddy &>/dev/null; then
     if [ -f /etc/caddy/Caddyfile ]; then
         logg "Existing configuration found at /etc/caddy/Caddyfile." "INFO"
         # prompt user to append to existing configuration
-        if [ "$(ask_user_yn "Do you want to append to the existing configuration?" "Y")" == "y" ]; then
+        if [ "$(ask_user_yn 'Do you want to append to the existing configuration?' 'Y')" == "y" ]; then
             append_caddy_config
         else
             logg "Existing configuration are untouched." "SUCCESS" "$GREEN"
-            exit 0
         fi
+    else
+        logg "No CaddyFile found. Not touching anything" "INFO"
     fi
-    logg "Existing configuration are untouched." "SUCCESS" "$GREEN"
-    exit 0
 else
     install_caddy && deploy_caddy_config
 fi
 
-if [ $GEN_DOMAIN_NAME -eq 1 ]; then
-    print_ddns_box
-fi
+finally
